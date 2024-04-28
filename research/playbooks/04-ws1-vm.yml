@@ -1,0 +1,150 @@
+- name: PHASE 1 WS1-VM Clone a linked template in Proxmox
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Create ws1
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        clone: "{{ vm_proxmox_clone }}"
+        name: "{{ vm_proxmox_name_3 }}"
+        format: "{{ vm_proxmox_format }}"
+        newid: "{{ vm_proxmox_id_ws1 }}"
+        full: false
+
+    - name: Sleep for 10 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 10
+
+    - name: Update VM configuration
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_3 }}"
+        cores: "{{ vm_proxmox_cores }}"
+        memory: "{{ vm_proxmox_memory }}"
+        net:
+          net0: virtio={{ var_env_mac_base }},bridge={{ var_env_bridge_0 }},firewall=0
+          net1: virtio,bridge={{ var_env_bridge_2 }},firewall=0
+        update: true
+        update_unsafe: true
+
+    - name: Sleep for 3 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 3
+
+    - name: Start ws1
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_3 }}"
+        state: started
+
+    - name: Sleep for 25 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 25
+
+- name: PHASE 2 Setup WS1
+  hosts: base
+  become: true
+  become_method: sudo
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+  tasks:
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Remove faucet packages
+      ansible.builtin.apt:
+        name:
+          - faucet-all-in-one
+          - faucet
+          - gauge
+          - python3-faucet
+          - prometheus
+          - grafana
+        purge: true
+        state: absent
+
+    - name: Remove dependencies that are no longer required and purge their configuration files
+      ansible.builtin.apt:
+        autoclean: true
+        autoremove: true
+        clean: true
+
+    - name: Add hostname on localhost in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.0\.1.*localhost'
+        line: "127.0.0.1        localhost {{ vm_proxmox_name_3 }}"
+
+    - name: Replace hostname in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1.*$CHANGE\.$CHANGE\.com'
+        line: "127.0.1.1        {{ vm_proxmox_name_3 }}.$CHANGE.$CHANGE.com"
+
+    - name: Set hostname ws1
+      ansible.builtin.hostname:
+        name: "{{ vm_proxmox_name_3 }}"
+
+    - name: Add an Ethernet connection with static IP configuration
+      community.general.nmcli:
+        conn_name: "{{ var_env_int_1 }}"
+        ifname: "{{ var_env_int_1 }}"
+        type: ethernet
+        ip4: "{{ var_ws1_ip }}"
+        gw4: "{{ var_work_gw }}"
+        state: present
+
+- name: PHASE 3 Restart and update NIC after applying packages
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Update VM configuration
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_3 }}"
+        interface: net0
+        state: absent
+
+    - name: Add and turn off MGMT NIC
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_3 }}"
+        interface: net0
+        bridge: "{{ var_env_bridge_0 }}"
+        mac: "{{ var_env_mac_ws1 }}"
+        firewall: false
+        link_down: true
+
+    - name: Restart ws1
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_3 }}"
+        state: restarted
+      ignore_errors: true

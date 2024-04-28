@@ -1,0 +1,23 @@
+all:
+  children:
+    pmox:
+      hosts:
+        $CHANGE.com:
+    base:
+      hosts:
+        397-Research-Active.$CHANGE.com:
+      vars:
+        ansible_user: research
+        ansible_ssh_private_key_file: /$PATH/research/project_files/id_rsa
+    faucet:
+      hosts:
+        faucetsdn.$CHANGE.com:
+      vars:
+        ansible_user: research
+        ansible_ssh_private_key_file: /$PATH/research/project_files/id_rsa
+    mgmt:
+      hosts:
+        mgmt.$CHANGE.com:
+      vars:
+        ansible_user: research
+        ansible_ssh_private_key_file: /$PATH/research/project_files/id_rsa

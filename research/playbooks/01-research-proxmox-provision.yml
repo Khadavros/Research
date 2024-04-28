@@ -1,0 +1,177 @@
+---
+- name: Provision base image
+  hosts: base
+  vars_files:
+    - /$PATH/research/project_files/researchpubkey.yaml
+  tasks:
+    - name: Update and upgrade apt packages
+      ansible.builtin.apt:
+        upgrade: true
+        update_cache: true
+
+    - name: Install relevant packages
+      ansible.builtin.package:
+        pkg:
+          - network-manager
+          - gnome-core
+          - iperf3
+          - sudo
+          - curl
+          - gnupg
+          - apt-transport-https
+          - lsb-release
+
+    - name: Download repository installation script
+      ansible.builtin.get_url:
+        url: https://packagecloud.io/install/repositories/faucetsdn/faucet/script.deb.sh
+        dest: /tmp/script.deb.sh
+
+    - name: Run repository installation script
+      ansible.builtin.shell: "sudo bash /tmp/script.deb.sh"
+
+    - name: Install faucet all-in-one
+      ansible.builtin.apt:
+        name: faucet-all-in-one
+        state: present
+
+    - name: Create research group
+      ansible.builtin.group:
+        name: research
+        state: present
+
+    - name: Create research account
+      ansible.builtin.user:
+        name: research
+        comment: Research
+        shell: /bin/bash
+        groups: sudo, research
+
+    - name: Create research .ssh dir
+      ansible.builtin.file:
+        path: /home/research/.ssh
+        state: directory
+        mode: "700"
+
+    - name: Copy research SSH key file
+      ansible.builtin.copy:
+        src: "{{ vm_provision_research_ssh }}"
+        dest: /home/research/.ssh/authorized_keys
+        owner: research
+        group: research
+        mode: "600"
+
+    - name: Recursively set perms on research home dir
+      ansible.builtin.file:
+        path: /home/research/
+        state: directory
+        recurse: true
+        owner: research
+        group: research
+
+    - name: Delete root authorized key file
+      ansible.builtin.file:
+        path: /root/.ssh/authorized_keys
+        state: absent
+
+    # Edit sshd_config
+
+    - name: Populate service facts
+      ansible.builtin.service_facts:
+    - name: Print service facts
+      ansible.builtin.debug:
+        var: ansible_facts.services["sshd.service"]
+
+    - name: Protocols
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^Protocol 2"
+        line: "Protocol 2"
+      notify:
+        - Restart SSHD
+
+    - name: Pubkey Auth Enable
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^#?PubkeyAuthentication"
+        line: "PubkeyAuthentication yes"
+      notify:
+        - Restart SSHD
+
+    - name: UsePAM Disable
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^#?UsePAM"
+        line: "UsePAM no"
+      notify:
+        - Restart SSHD
+
+    - name: Password Auth Disable
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication no"
+      notify:
+        - Restart SSHD
+
+    - name: ChallengeResponse Disable
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^#?ChallengeResponseAuthentication"
+        line: "ChallengeResponseAuthentication no"
+      notify:
+        - Restart SSHD
+
+    - name: Root Login Disable
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^PermitRootLogin"
+        line: "PermitRootLogin No"
+      notify:
+        - Restart SSHD
+
+    - name: Privilege Separation Enable
+      ansible.builtin.lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: "^UsePrivilegeSeparation"
+        line: "UsePrivilegeSeparation sandbox"
+      notify:
+        - Restart SSHD
+
+    - name: Host Key ed25519 - Enable
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^HostKey /etc/ssh/ssh_host_ed25519_key"
+        line: "HostKey /etc/ssh/ssh_host_ed25519_key"
+      notify:
+        - Restart SSHD
+
+    - name: Host Key RSA - Enable
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^HostKey /etc/ssh/ssh_host_rsa_key"
+        line: "HostKey /etc/ssh/ssh_host_rsa_key"
+      notify:
+        - Restart SSHD
+
+    - name: Host Key ECDSA Disable
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^HostKey /etc/ssh/ssh_host_ecdsa_key"
+        state: absent
+      notify: Restart SSHD
+
+    - name: Host Key DSA Disable
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^HostKey /etc/ssh/ssh_host_dsa_key"
+        state: absent
+      notify: Restart SSHD
+
+  handlers:
+    - name: Restart SSHD
+      ansible.builtin.service:
+        name: sshd
+        state: restarted
+      when:
+        - ansible_facts.services["sshd.service"] ['state'] == 'active' or 'running'
+        - ansible_facts.services["sshd.service"] ['status'] == 'enabled'

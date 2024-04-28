@@ -1,0 +1,43 @@
+- name: Destroy Environment
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+
+
+  tasks:
+    - name: Stop VM
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        vmid: "{{ item }}"
+        state: stopped
+      ignore_errors: true
+      loop:
+        - "{{ vm_proxmox_id_faucet }}"
+        - "{{ vm_proxmox_id_mgmt }}"
+        - "{{ vm_proxmox_id_ws1 }}"
+        - "{{ vm_proxmox_id_ws2 }}"
+
+    - name: Sleep for 15 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 10
+
+    - name: Remove VM
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        vmid: "{{ item }}"
+        state: absent
+      ignore_errors: true
+      loop:
+        - "{{ vm_proxmox_id_faucet }}"
+        - "{{ vm_proxmox_id_mgmt }}"
+        - "{{ vm_proxmox_id_ws1 }}"
+        - "{{ vm_proxmox_id_ws2 }}"

@@ -1,0 +1,332 @@
+- name: PHASE 1 FAUCSETSDN Clone a linked template in Proxmox
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Create faucetsdn controller
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        clone: "{{ vm_proxmox_clone }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        format: "{{ vm_proxmox_format }}"
+        newid: "{{ vm_proxmox_id_faucet }}"
+        full: false
+
+    - name: Sleep for 10 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 10
+
+    - name: Update VM configuration
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        cores: "{{ vm_proxmox_cores }}"
+        memory: "{{ vm_proxmox_memory }}"
+        net:
+          net0: virtio={{ var_env_mac_base }},bridge={{ var_env_bridge_0 }},firewall=0
+          net1: virtio,bridge={{ var_env_bridge_1 }},firewall=0
+          net2: virtio,bridge={{ var_env_bridge_2 }},firewall=0
+          net3: virtio,bridge={{ var_env_bridge_3 }},firewall=0
+          net4: virtio,bridge={{ var_env_bridge_4 }},firewall=0
+          net5: virtio,bridge={{ var_env_bridge_5 }},firewall=0
+          net6: virtio,bridge={{ var_env_bridge_6 }},firewall=0
+        update: true
+        update_unsafe: true
+
+    - name: Sleep for 3 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 3
+
+    - name: Start faucetsdn
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        state: started
+
+    - name: Sleep for 25 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 25
+
+- name: PHASE 2 Setup Packages and Hostname
+  hosts: base
+  become: true
+  become_method: sudo
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+  tasks:
+    - name: Add hostname on localhost in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.0\.1.*localhost'
+        line: "127.0.0.1        localhost {{ vm_proxmox_name_1 }}"
+
+    - name: Replace hostname in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1.*$CHANGE\$CHANGE\.com'
+        line: "127.0.1.1        {{ vm_proxmox_name_1 }}.$CHANGE.$CHANGE.com"
+
+    - name: Set hostname faucetsdn
+      ansible.builtin.hostname:
+        name: "{{ vm_proxmox_name_1 }}"
+
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Remove gnome and network-manager
+      ansible.builtin.apt:
+        name:
+          - gnome*
+          - network-manager
+        purge: true
+        state: absent
+
+    - name: Remove dependencies that are no longer required and purge their configuration files
+      ansible.builtin.apt:
+        autoclean: true
+        autoremove: true
+        clean: true
+
+    - name: Add lines to interfaces file
+      lineinfile:
+        path: /etc/network/interfaces
+        line: "auto {{ item }}\niface {{ item }} inet manual"
+        insertafter: EOF
+      loop:
+        - "{{ var_env_int_1 }}"
+        - "{{ var_env_int_2 }}"
+        - "{{ var_env_int_3 }}"
+        - "{{ var_env_int_4 }}"
+        - "{{ var_env_int_5 }}"
+        - "{{ var_env_int_6 }}"
+
+    - name: Add MGMT NIC to interfaces file
+      lineinfile:
+        path: /etc/network/interfaces
+        line: "auto {{ var_env_int_mgmt }}\niface {{ var_env_int_mgmt }} inet dhcp"
+        insertafter: EOF
+
+- name: PHASE 3 Restart and add MGMT NIC after applying packages
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Remove old NIC
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        interface: net0
+        state: absent
+
+    - name: Add MGMT NIC
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        interface: net7
+        bridge: "{{ var_env_bridge_0 }}"
+        mac: "{{ var_env_mac_faucet }}"
+        firewall: false
+
+    - name: Restart faucetsdn
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        node: "{{ vm_proxmox_node }}"
+        state: restarted
+
+    - name: Sleep for 25 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 25
+
+- name: PHASE 4 Setup Faucet/Prometheus/Grafana/OVS
+  hosts: faucet
+  become: true
+  become_method: sudo
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+  tasks:
+    - name: Copy Grafana datasources file
+      ansible.builtin.copy:
+        src: "{{ var_grafana_datasource_src }}"
+        dest: "/etc/grafana/provisioning/datasources/default.yaml"
+        owner: root
+        group: grafana
+        mode: "0755"
+
+    - name: Create /var/lib/grafana/dashboards directory
+      ansible.builtin.file:
+        path: /var/lib/grafana/dashboards
+        state: directory
+        owner: grafana
+        group: grafana
+        mode: "0755"
+
+    - name: Copy grafana dashboard provider file
+      ansible.builtin.copy:
+        src: "{{ var_grafana_dashboard_src }}"
+        dest: "/etc/grafana/provisioning/dashboards/default.yaml"
+        owner: root
+        group: grafana
+        mode: "0755"
+
+    - name: Copy grafana dashboard files
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      with_items:
+        - {
+            src: "{{ var_grafana_db_1 }}",
+            dest: "/var/lib/grafana/dashboards/faucet_instrumentation.json",
+            owner: "grafana",
+            group: "grafana",
+            mode: "0755",
+          }
+        - {
+            src: "{{ var_grafana_db_2 }}",
+            dest: "/var/lib/grafana/dashboards/faucet_inventory.json",
+            owner: "grafana",
+            group: "grafana",
+            mode: "0755",
+          }
+        - {
+            src: "{{ var_grafana_db_3 }}",
+            dest: "/var/lib/grafana/dashboards/faucet_port_statistics.json",
+            owner: "grafana",
+            group: "grafana",
+            mode: "0755",
+          }
+
+    - name: Edit /etc/default/prometheus
+      ansible.builtin.lineinfile:
+        path: /etc/default/prometheus
+        regexp: "^ARGS="
+        line: 'ARGS="--config.file=/etc/faucet/prometheus/prometheus.yml"'
+
+    - name: Daemon-reload before continuing
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Restart services
+      ansible.builtin.service:
+        name: "{{ item.name }}"
+        state: restarted
+      loop:
+        - { name: "grafana-server" }
+        - { name: "prometheus" }
+
+    - name: Enable services on boot
+      ansible.builtin.service:
+        name: "{{ item.name }}"
+        enabled: true
+      loop:
+        - { name: "grafana-server" }
+        - { name: "prometheus" }
+
+    - name: Copy faucet config file
+      ansible.builtin.copy:
+        src: "{{ var_faucetcfg_src }}"
+        dest: "/etc/faucet/faucet.yaml"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install OVS
+      ansible.builtin.apt:
+        name: openvswitch-switch
+        state: present
+
+    - name: Reload Faucet
+      ansible.builtin.service:
+        name: faucet
+        state: reloaded
+
+    - name: Restart gauge
+      ansible.builtin.service:
+        name: gauge
+        state: restarted
+
+    - name: Create Open vSwitch bridge
+      openvswitch.openvswitch.openvswitch_bridge:
+        bridge: br0
+        state: present
+
+    - name: Set OVS bridge configuration
+      ansible.builtin.command:
+        cmd: "ovs-vsctl set bridge br0 {{ item }}"
+      loop:
+        - "other-config:datapath-id=0000000000000001"
+        - "other-config:disable-in-band=true"
+        - "fail-mode=secure"
+
+    - name: Add ports to br0
+      ansible.builtin.command:
+        cmd: "ovs-vsctl add-port br0 {{ item.interface }} -- set interface {{ item.interface }} ofport_request={{ item.ofport }}"
+      loop:
+        - { interface: "{{ var_env_int_1 }}", ofport: 1 }
+        - { interface: "{{ var_env_int_2 }}", ofport: 2 }
+        - { interface: "{{ var_env_int_3 }}", ofport: 3 }
+        - { interface: "{{ var_env_int_4 }}", ofport: 4 }
+        - { interface: "{{ var_env_int_5 }}", ofport: 5 }
+        - { interface: "{{ var_env_int_6 }}", ofport: 6 }
+      loop_control:
+        loop_var: item
+
+    - name: Set OVS controller
+      ansible.builtin.command:
+        cmd: "ovs-vsctl set-controller br0 tcp:127.0.0.1:6653 tcp:127.0.0.1:6654"
+
+- name: PHASE 5 Restart
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Turn off MGMT NIC
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        interface: net7
+        bridge: "{{ var_env_bridge_0 }}"
+        mac: "{{ var_env_mac_faucet }}"
+        firewall: false
+        link_down: true
+
+    - name: Restart faucetsdn
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_1 }}"
+        node: "{{ vm_proxmox_node }}"
+        state: restarted

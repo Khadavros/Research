@@ -1,0 +1,54 @@
+---
+vlans:
+    work:
+        vid: 100
+        description: "Work"
+        faucet_vips:
+            - '192.168.10.1/24'
+    mgmt:
+        vid: 200
+        description: "MGMT"
+        faucet_vips:
+            - '192.168.20.1/24'
+    ics:
+        vid: 300
+        description: "ICS"
+        faucet_vips:
+            - '192.168.30.1/24'
+routers:
+    router-mgmt-ics:
+        vlans: [mgmt, ics]
+    router-mgmt-work:
+        vlans: [mgmt, work]
+
+dps:
+    sw1:
+        dp_id: 0x1
+        hardware: "Open vSwitch"
+        interfaces:
+            1:
+                name: "mgmtws"
+                description: "Management Workstation"
+                tagged_vlans: [mgmt, ics, work]
+            2:
+                name: "ws1"
+                description: "ws1"
+                native_vlan: work
+            3:
+                name: "ws2"
+                description: "ws2"
+                native_vlan: work
+            4:
+                name: "chemplant"
+                description: "Chemical Plant"
+                native_vlan: ics
+            5:
+                name: "plc2"
+                description: "PLC2"
+                native_vlan: ics
+                tagged_vlans: [mgmt]
+            6:
+                name: "scadabr"
+                description: "scadabr"
+                native_vlan: ics
+                tagged_vlans: [mgmt]

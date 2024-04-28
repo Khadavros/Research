@@ -1,0 +1,213 @@
+- name: PHASE 1 MGMT-VM Clone a linked template in Proxmox
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Create mgmt
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        clone: "{{ vm_proxmox_clone }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        format: "{{ vm_proxmox_format }}"
+        newid: "{{ vm_proxmox_id_mgmt }}"
+        full: false
+
+    - name: Sleep for 10 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 10
+
+    - name: Update VM configuration
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        cores: "{{ vm_proxmox_cores }}"
+        memory: "{{ vm_proxmox_memory }}"
+        net:
+          net0: virtio={{ var_env_mac_base }},bridge={{ var_env_bridge_0 }},firewall=0
+          net1: virtio,bridge={{ var_env_bridge_1 }},firewall=0
+        update: true
+        update_unsafe: true
+
+    - name: Sleep for 3 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 3
+
+    - name: Start mgmt
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        state: started
+
+    - name: Sleep for 25 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 25
+
+- name: PHASE 2 Setup MGMT Packages
+  hosts: base
+  become: true
+  become_method: sudo
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+  gather_facts: false
+  tasks:
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Remove faucet packages
+      ansible.builtin.apt:
+        name:
+          - faucet-all-in-one
+          - faucet
+          - gauge
+          - python3-faucet
+          - prometheus
+          - grafana
+        purge: true
+        state: absent
+
+    - name: Remove dependencies that are no longer required and purge their configuration files
+      ansible.builtin.apt:
+        autoclean: true
+        autoremove: true
+        clean: true
+
+    - name: Add hostname on localhost in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.0\.1.*localhost'
+        line: "127.0.0.1        localhost {{ vm_proxmox_name_2 }}"
+
+    - name: Replace hostname in /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1.*$CHANGE\.$CHANGE\.com'
+        line: "127.0.1.1        {{ vm_proxmox_name_2 }}.$CHANGE.$CHANGE.com"
+
+    - name: Set hostname mgmt
+      ansible.builtin.hostname:
+        name: "{{ vm_proxmox_name_2 }}"
+
+- name: PHASE 3 Restart and add MGMT NIC after applying packages
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Remove old NIC
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        interface: net0
+        state: absent
+
+    - name: Add MGMT NIC
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        interface: net0
+        bridge: "{{ var_env_bridge_0 }}"
+        mac: "{{ var_env_mac_mgmt }}"
+        firewall: false
+
+    - name: Restart MGMT
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        node: "{{ vm_proxmox_node }}"
+        state: restarted
+
+    - name: Sleep for 25 seconds and continue with play
+      ansible.builtin.wait_for:
+        timeout: 25
+
+- name: PHASE 4 Setup MGMT VLANs
+  hosts: mgmt
+  become: true
+  become_method: sudo
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+  tasks:
+    - name: Add VLAN 100 connection
+      ansible.builtin.nmcli:
+        type: vlan
+        conn_name: vlan100
+        ifname: vlan100
+        vlandev: enp6s19
+        vlanid: 100
+        ip4: "{{ var_mgmt_vlan100_ip }}"
+        gw4: "{{ var_mgmt_vlan100_gw }}"
+        state: present
+
+    - name: Add VLAN 200 connection
+      ansible.builtin.nmcli:
+        type: vlan
+        conn_name: vlan200
+        ifname: vlan200
+        vlandev: enp6s19
+        vlanid: 200
+        ip4: "{{ var_mgmt_vlan200_ip }}"
+        gw4: "{{ var_mgmt_vlan200_gw }}"
+        state: present
+
+    - name: Add VLAN 300 connection
+      ansible.builtin.nmcli:
+        type: vlan
+        conn_name: vlan300
+        ifname: vlan300
+        vlandev: enp6s19
+        vlanid: 300
+        ip4: "{{ var_mgmt_vlan300_ip }}"
+        gw4: "{{ var_mgmt_vlan300_gw }}"
+        state: present
+
+- name: PHASE 5 Restart
+  hosts: pmox
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+    - "{{ var_proxmox_api_token }}"
+  tasks:
+    - name: Turn off MGMT NIC
+      community.general.proxmox_nic:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        interface: net0
+        bridge: "{{ var_env_bridge_0 }}"
+        mac: "{{ var_env_mac_mgmt }}"
+        firewall: false
+        link_down: true
+
+    - name: Restart mgmt-vm
+      community.general.proxmox_kvm:
+        api_user: "{{ vm_proxmox_api_user }}"
+        api_host: "{{ vm_proxmox_api_host }}"
+        api_token_id: "{{ vm_proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        node: "{{ vm_proxmox_node }}"
+        name: "{{ vm_proxmox_name_2 }}"
+        state: restarted

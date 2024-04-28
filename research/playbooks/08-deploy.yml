@@ -1,0 +1,8 @@
+- name: Playbook 1
+  ansible.builtin.import_playbook: 02-faucetsdn-vm.yml
+- name: Playbook 2
+  ansible.builtin.import_playbook: 03-mgmt-vm.yml
+- name: Playbook 3
+  ansible.builtin.import_playbook: 04-ws1-vm.yml
+- name: Playbook 4
+  ansible.builtin.import_playbook: 05-ws2-vm.yml

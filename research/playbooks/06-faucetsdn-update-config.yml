@@ -1,0 +1,25 @@
+- name: Update faucet config
+  hosts: faucet
+  become: true
+  become_method: sudo
+  vars_files:
+    - "/$PATH/research/vars/vm-main.yml"
+  tasks:
+    - name: Replace faucet config file
+      ansible.builtin.copy:
+        src: "{{ var_faucetcfg_src }}"
+        dest: "/etc/faucet/faucet.yaml"
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+
+    - name: Reload faucet so it can pick up new changes
+      ansible.builtin.service:
+        name: faucet
+        state: reloaded
+
+    - name: Restart gauge to pick up faucet config
+      ansible.builtin.service:
+        name: gauge
+        state: restarted

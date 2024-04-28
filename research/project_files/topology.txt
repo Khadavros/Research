@@ -1,0 +1,55 @@
+faucetsdn
+vmbr7
+    MAC: $CHANGE
+    IP: 10.0.30.13
+
+mgmt
+vmbr1
+vlan100: 192.168.10.4
+vlan200: 192.168.20.3
+vlan300: 192.168.30.10
+vmbr7
+    MAC: $CHANGE
+    IP: $CHANGE
+
+ws1
+vmbr2
+192.168.10.2
+vmbr7
+    MAC: $CHANGE
+    IP: $CHANGE
+
+ws2
+vmbr3
+192.168.10.3
+vmbr7
+    MAC: $CHANGE
+    IP: $CHANGE
+
+ChemicalPlant
+vmbr4
+Simulation (Chemical Plant): simulation | Fortiphyd
+cd /GRIFCSv2/simulation_vm/simulation/remote_io/modbus
+./run_all
+:0 192.168.30.2
+:1 192.168.30.3
+:2 192.168.30.4
+:3 192.168.30.5
+:4 192.168.30.6
+:5 192.168.30.7
+Website: 192.168.30.2
+
+
+PLC2
+vmbr5
+PLC: user | password
+192.168.30.8
+Website: 192.168.30.8:8080
+
+ScadaBR
+vmbr6
+HMI (ScadaBR): scadabr | scadabr web console: admin | admin
+192.168.30.9
+Website: 192.168.30.9:8080/ScadaBR
+
+
